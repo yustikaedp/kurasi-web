@@ -277,3 +277,119 @@ def cmd_status(brand, berkas, teks="", tulis=False):
         inti.info("sudah berubah jadi berjam: python wa.py akun %s" % brand)
     finally:
         ktx.close(); pw.stop()
+
+
+# ----------------------------------------------------------------- status teks
+#
+# Alur composer Teks BELUM dipetakan seperti alur video di atas. Penanda di
+# bawah ini tebakan dari tampilan WhatsApp Web, jadi pakai pertama HARUS
+# pratinjau. Kalau ada yang tidak ketemu, perintah berhenti, memotret, dan
+# menyebut label tombol yang ada supaya penandanya bisa dibetulkan.
+
+BATAS_TEKS = 700                    # batas Status teks WhatsApp
+PILIHAN_TEKS = ["[aria-label='Teks']", "[aria-label='Text']",
+                "li:has-text('Teks')", "li:has-text('Text')"]
+
+
+def label_tombol(hal):
+    return hal.evaluate("""() => [...new Set([...document.querySelectorAll(
+        '[aria-label]')].map(e => e.getAttribute('aria-label')))].slice(0, 60)""")
+
+
+def sudah_pernah_teks(brand, teks):
+    if not os.path.exists(inti.LOG):
+        return None
+    kunci = "WA Status teks %s: %s" % (brand, teks.strip())
+    for baris in open(inti.LOG, encoding="utf-8", errors="replace"):
+        if kunci in baris:
+            return baris.strip()
+    return None
+
+
+def cmd_teks(brand, teks, tulis=False):
+    brand = brand.lower()
+    teks = (teks or "").strip()
+    if not teks:
+        inti.gagal("Teksnya kosong.")
+    if "\n" in teks:
+        inti.gagal("Teks lebih dari satu baris belum didukung.")
+    if len(teks) > BATAS_TEKS:
+        inti.gagal("Lebih dari %d karakter - Status teks menolak." % BATAS_TEKS)
+    inti.info("teks   : %s" % teks)
+    inti.info("brand  : %s" % brand)
+    # Tidak ada nama berkas yang bisa dicocokkan, jadi satu-satunya penjaga
+    # brand adalah nama akun. Karena itu brand WAJIB terdaftar di config.
+    harap = (inti.baca_config().get("nama_akun") or {}).get(brand)
+    if not harap:
+        inti.gagal("Brand %r belum terdaftar di config.json > nama_akun.\n"
+                   "  Status teks tidak punya nama berkas untuk dicocokkan, jadi "
+                   "nama akun wajib terkunci dulu." % brand)
+    lama = sudah_pernah_teks(brand, teks)
+    if lama:
+        inti.gagal("SUDAH PERNAH NAIK:\n   %s\n  Hapus barisnya dari "
+                   "riwayat.log kalau memang sengaja diulang." % lama)
+
+    pw, ktx, hal = buka(brand)
+    try:
+        nama, _ = nama_akun(hal)
+        inti.info("akun   : %s" % (nama or "(tidak terbaca)"))
+        if inti.rapi(harap) != inti.rapi(nama):
+            inti.gagal("AKUN TIDAK COCOK. config menyebut %r, terbaca %r."
+                       % (harap, nama))
+        inti.info("         cocok dengan brand")
+
+        inti.info("\nbuka tab Status")
+        hal.locator("button[aria-label='Status']").first.click()
+        time.sleep(3)
+        hal.locator("button[aria-label='Add Status']").first.click()
+        time.sleep(2)
+
+        pilih = None
+        for s in PILIHAN_TEKS:
+            if hal.locator(s).count():
+                pilih = s
+                break
+        if not pilih:
+            potret(hal, "tanpa-teks-%s" % brand)
+            inti.gagal("Pilihan 'Teks' tidak ketemu. Label yang ada:\n   %s"
+                       % " | ".join(label_tombol(hal)))
+        inti.info("pilih Teks (%s)" % pilih)
+        hal.locator(pilih).first.click()
+        time.sleep(2)
+
+        kotak = hal.locator("div[contenteditable='true']")
+        if not kotak.count():
+            potret(hal, "tanpa-kotak-teks-%s" % brand)
+            inti.gagal("Kotak ketik Status teks tidak ketemu. Tidak ada yang "
+                       "dikirim.")
+        kotak.last.click()
+        time.sleep(0.8)
+        kotak.last.type(teks, delay=25)
+        time.sleep(4)      # beri waktu pratinjau link muncul
+        inti.info("   teks diketik")
+
+        gbr = potret(hal, "teks-%s-%s" % (brand, time.strftime("%Y%m%d-%H%M")))
+        kirim = hal.locator("[aria-label^='Kirim'], [aria-label='Send']")
+        if not kirim.count():
+            potret(hal, "tanpa-tombol-teks-%s" % brand)
+            inti.gagal("Tombol kirim tidak ketemu. Label yang ada:\n   %s"
+                       % " | ".join(label_tombol(hal)))
+        inti.info("   tombol kirim: %s" % kirim.first.get_attribute("aria-label"))
+
+        if not tulis:
+            hal.keyboard.press("Escape")
+            time.sleep(2)
+            inti.info("\nPRATINJAU saja - composer dibatalkan.")
+            inti.info("Tidak ada Status yang terbit. Buka potretnya: %s" % gbr)
+            return
+
+        kirim.first.click()
+        time.sleep(8)
+        inti.catat("WA Status teks %s: %s terbit %s"
+                   % (brand, teks, time.strftime("%Y-%m-%d %H:%M")))
+        potret(hal, "sesudah-teks-%s" % brand)
+        inti.info("\nTERKIRIM dan dicatat di riwayat.log.")
+        inti.info("Buktinya BUKAN tulisan ini. Periksa baris 'Status saya'")
+        inti.info("sudah berubah jadi berjam: python wa.py akun %s" % brand)
+    finally:
+        ktx.close(); pw.stop()

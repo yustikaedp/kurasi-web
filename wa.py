@@ -7,6 +7,7 @@
     python wa.py login <brand>                 buka jendela untuk scan QR
     python wa.py akun <brand>                  BACA nama akunnya
     python wa.py status <brand> <berkas> [--teks "..."] [--tulis]
+    python wa.py teks <brand> "<teks atau link>" [--tulis]
     python wa.py kirim <tgl> [--brand a,b] [--tulis]
     python wa.py slot <tgl> <jam> [--brand a,b] [--tulis]
 
@@ -242,6 +243,8 @@ def main():
         status.cmd_akun(a[2])
     elif p == "status" and len(a) > 3:
         status.cmd_status(a[2], a[3], ambil(a, "--teks", ""), "--tulis" in a)
+    elif p == "teks" and len(a) > 3:
+        status.cmd_teks(a[2], a[3], "--tulis" in a)
     elif p == "kirim" and len(a) > 2:
         cmd_kirim(a)
     elif p == "slot" and len(a) > 3:
