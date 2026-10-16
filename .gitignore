@@ -8,6 +8,10 @@
 # Hasil unduhan dari Drive, bisa ratusan MB
 unduhan/
 
+# Bahan & hasil kurasi visual: contact sheet + PDF, bisa puluhan MB
+kurasi/
+kurasi_frames/
+
 # Indeks Drive, disusun ulang sendiri lewat 'python wa.py indeks'
 indeks_drive.json
 
@@ -16,3 +20,7 @@ riwayat.log
 
 __pycache__/
 *.pyc
+
+# Frontend React: dependensi & hasil build, jangan masuk repo
+web/node_modules/
+web/dist/

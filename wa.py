@@ -3,6 +3,7 @@
 
     python wa.py siap                          periksa kesiapan, tidak mengubah apa pun
     python wa.py indeks                        susun ulang indeks Drive
+    python wa.py kurasi <folder/link> [--tulis]  contact sheet + PDF tinjauan visual
     python wa.py unduh <tgl> [--brand a,b] [--tulis]
     python wa.py login <brand>                 buka jendela untuk scan QR
     python wa.py akun <brand>                  BACA nama akunnya
@@ -29,6 +30,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import wa_inti as inti
 import wa_konten as konten
+import wa_kurasi as kurasi
 import wa_status as status
 
 
@@ -231,6 +233,8 @@ def main():
         cmd_siap()
     elif p == "indeks":
         konten.susun_indeks()
+    elif p == "kurasi" and len(a) > 2:
+        kurasi.cmd_kurasi(a[2], "--tulis" in a)
     elif p == "unduh" and len(a) > 2:
         konten.unduh(inti.baca_tanggal_perintah(a[2]),
                      daftar_brand(ambil(a, "--brand")), "--tulis" in a)

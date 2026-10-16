@@ -44,10 +44,14 @@ karena ingin "mencoba".
 
 ## Pasang
 
-Butuh Python 3.10 ke atas, dan `ffmpeg` kalau ingin durasi video diperiksa.
+Butuh Python 3.10 ke atas, dan `ffmpeg` kalau ingin durasi video diperiksa
+atau memakai perintah `kurasi` (yang mengambil frame video).
 
-    pip install playwright google-api-python-client google-auth-oauthlib
+    pip install playwright google-api-python-client google-auth-oauthlib fpdf2
     playwright install chromium
+
+`fpdf2` cuma dipakai perintah `kurasi` untuk menyusun PDF. Kalau tidak dipakai,
+boleh dilewati.
 
 Chrome biasa harus terpasang - alat ini memakai Chrome, bukan Chromium bawaan
 Playwright, supaya sesi WhatsApp-nya wajar.
@@ -151,6 +155,55 @@ Menelusuri ulang seluruh folder Drive, sekitar lima menit. **Jalankan ini
 dulu sebelum melapor bahwa sebuah konten tidak ada.** Indeks yang basi
 menyamar jadi "stok habis", dan itu sudah pernah bikin laporan salah selama
 seminggu.
+
+---
+
+## Kurasi visual sebuah folder
+
+    python wa.py kurasi <link-folder-Drive>            lihat dulu
+    python wa.py kurasi <link-folder-Drive> --tulis     unduh + buat PDF
+
+Mengambil **enam frame per video** jadi satu *contact sheet*, lalu menyusun
+semuanya ke satu **PDF tinjauan** - satu halaman satu video. Gunanya memeriksa
+dengan mata: komponennya jelas semua, dan **tidak ada teks yang nabrak,
+terpotong, atau ketutupan**. Linknya boleh link folder utuh atau id-nya saja.
+
+Hasilnya di `kurasi/<nama-folder>/`: contact sheet tiap video plus
+`review-<folder>.pdf`.
+
+**Yang dinilai perintah ini cuma visual.** Durasi dan ukuran **sengaja tidak
+diperiksa di sini** - keputusan user 16 Oktober 2026 ("cukup cek visual").
+Batas 30 detik / 16 MB tetap dijaga `wa_status` waktu *kirim*; itu urusan
+terpisah, bukan urusan kurasi.
+
+Penilaiannya sendiri tetap kerja **mata** - alat ini cuma menyiapkan
+bahannya. Butuh `ffmpeg` (ambil frame) dan `fpdf2` (susun PDF). Folder yang
+dibaca cuma yang diberikan; `Return` tidak disentuh.
+
+Contoh menyusun laporan temuan jadi PDF (narasi + sheet yang bermasalah) ada
+di `laporan_edubisa_2026-10-16.py` - memakai `wa_kurasi.laporan_pdf`.
+
+### Lewat aplikasi web (tinggal tempel link)
+
+Buat yang tidak mau mengetik perintah, ada antarmuka web: **klik dua kali
+`Kurasi-Web.bat`**, browser terbuka ke `http://127.0.0.1:8733`, tempel link
+folder Drive, tekan Jalankan. Di belakangnya memanggil `kurasi` yang sama,
+menampilkan log berjalan, lalu tombol buka PDF / folder hasil.
+
+Frontend React (folder `web/`, di-*build* dengan Vite jadi file statis),
+backend Flask (`kurasi_server.py`). Sekali di awal:
+
+    cd web
+    npm install
+    npm run build
+
+Lalu cukup `python kurasi_server.py` (atau `Kurasi-Web.bat`) untuk seterusnya.
+
+**Aman secara bawaan:** server hanya mendengar di `127.0.0.1` (tidak
+terjangkau dari jaringan), link divalidasi jadi id folder sebelum dipakai dan
+pipeline dipanggil tanpa shell (tak ada injeksi perintah), dan berkas hanya
+disajikan dari dalam folder `kurasi/`. Butuh `flask` (`pip install flask`)
+dan Node.js untuk tahap build frontend.
 
 ---
 

@@ -27,6 +27,7 @@ PROFIL_AKAR = os.path.join(AKAR, ".chrome")
 INDEKS = os.path.join(AKAR, "indeks_drive.json")
 LOG = os.path.join(AKAR, "riwayat.log")
 UNDUHAN = os.path.join(AKAR, "unduhan")
+KURASI = os.path.join(AKAR, "kurasi")
 
 SCOPES = [
     "https://www.googleapis.com/auth/drive",
