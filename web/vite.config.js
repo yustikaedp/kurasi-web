@@ -7,4 +7,6 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   build: { outDir: 'dist', emptyOutDir: true },
+  // npm run dev: teruskan /api ke backend Flask (python kurasi_server.py)
+  server: { proxy: { '/api': { target: 'http://127.0.0.1:8733', changeOrigin: true } } },
 })

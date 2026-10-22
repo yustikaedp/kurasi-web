@@ -24,8 +24,13 @@ import tempfile
 
 import wa_inti as inti
 
-ULANG = 6          # frame per contact sheet
-NISBAH = 0.375     # lebar:tinggi sheet (tile 2x3 dari video 9:16)
+# 12 frame/video (tile 3x4). Lebih rapat dari 6 supaya momen TRANSISI
+# tertangkap - di situ teks sering bertumpuk (caption lama memudar sementara
+# yang baru muncul). Pelajaran kurasi Edubisa 16 Okt 2026: 6 frame melewatkan
+# tumpukan teks yang baru kelihatan di 12 frame.
+ULANG = 12
+TILE = "3x4"
+NISBAH = 1620.0 / 3840.0   # lebar:tinggi sheet 3x4 dari video 9:16 (sel 540x960)
 
 
 # ----------------------------------------------------------------- bantu
@@ -40,9 +45,10 @@ def _ada_ffmpeg():
 
 
 def id_dari_link(s):
-    """Terima link Drive atau id telanjang, kembalikan id folder."""
+    """Terima link Drive (folder atau satu file video) atau id telanjang,
+    kembalikan id-nya."""
     s = (s or "").strip()
-    m = re.search(r"/folders/([A-Za-z0-9_\-]+)", s)
+    m = re.search(r"/(?:folders|file/d)/([A-Za-z0-9_\-]+)", s)
     if m:
         return m.group(1)
     m = re.search(r"[?&]id=([A-Za-z0-9_\-]+)", s)
@@ -97,7 +103,7 @@ def contact_sheet(video_path, keluar):
     d = _durasi(video_path) or 24.0
     subprocess.run(
         ["ffmpeg", "-y", "-i", video_path,
-         "-vf", "fps=%f,scale=540:-1,tile=2x3" % (ULANG / d),
+         "-vf", "fps=%f,scale=540:-1,tile=%s" % (ULANG / d, TILE),
          "-frames:v", "1", "-q:v", "3", keluar],
         capture_output=True, text=True)
 
@@ -150,7 +156,7 @@ def review_pdf(judul, items, keluar):
     pdf.ln(2)
     pdf.set_font("Helvetica", "", 11)
     _para(pdf, 6,
-        "%d video. Satu halaman satu video - enam frame, kiri-atas ke "
+        "%d video. Satu halaman satu video - 12 frame, kiri-atas ke "
         "kanan-bawah. Tinjau: komponen jelas semua, dan tidak ada teks "
         "yang nabrak / terpotong / ketutupan." % len(items))
 
@@ -214,23 +220,35 @@ def laporan_pdf(judul, subjudul, ringkas, temuan, keluar):
 
 # ----------------------------------------------------------------- perintah
 
-def cmd_kurasi(folder_arg, tulis=False):
+def cmd_kurasi(folder_arg, tulis=False, nilai=False):
     """Siapkan bahan kurasi visual dari satu folder Drive.
 
     PRATINJAU dulu (tanpa --tulis): cuma mendata video. Dengan --tulis:
     unduh tiap video, buat contact sheet, lalu susun buku tinjauan PDF.
+    Dengan --nilai juga: narasi suara ditranskrip, lalu contact sheet +
+    narasi dinilai otomatis (kata, visual & kebenaran info, lihat wa_nilai)
+    sebelum dihapus; hasilnya laporan teks + transkrip di folder hasil.
     """
     _ada_ffmpeg()
     drive = inti.layanan()[1]
     fid = id_dari_link(folder_arg)
     try:
-        nama_folder = drive.files().get(
-            fileId=fid, fields="name", supportsAllDrives=True).execute()["name"]
+        info = drive.files().get(
+            fileId=fid, fields="name,mimeType", supportsAllDrives=True).execute()
     except Exception as e:
         inti.gagal("Folder tidak terbaca: %s\n  Pastikan linknya benar dan akun "
                    "Google alat ini punya akses." % str(e)[:120])
+    nama_folder = info["name"]
 
-    vids = kumpulkan(drive, fid)
+    if info["mimeType"] == "application/vnd.google-apps.folder":
+        vids = kumpulkan(drive, fid)
+    elif nama_folder.lower().endswith((".mp4", ".mov", ".m4v")):
+        # link satu video (/file/d/<id>) - dikurasi sendirian
+        vids = [{"id": fid, "nama": nama_folder, "jalur": ""}]
+        nama_folder = re.sub(r"\.(mp4|mov|m4v)$", "", nama_folder, flags=re.I)
+    else:
+        inti.gagal("Link itu bukan folder atau video (.mp4/.mov/.m4v): %s"
+                   % nama_folder)
     inti.info("Folder: %s" % nama_folder)
     inti.info("%d video ditemukan" % len(vids))
     for v in vids:
@@ -253,7 +271,12 @@ def cmd_kurasi(folder_arg, tulis=False):
     # user 16 Oktober 2026 ("langsung jadi pdf, tanpa simpan jpg dan video").
     kerja = tempfile.mkdtemp(prefix="kurasi_")
     tmp = os.path.join(kerja, "_tmp.mp4")
-    items = []
+    items, narasi = [], []
+    if nilai:
+        import wa_nilai
+        if not os.path.isfile(wa_nilai.WHISPER):
+            inti.info("Model whisper tidak ada (%s) - narasi suara tidak ikut "
+                      "dinilai." % wa_nilai.WHISPER)
     inti.info("")
     try:
         for i, v in enumerate(vids, 1):
@@ -263,19 +286,27 @@ def cmd_kurasi(folder_arg, tulis=False):
             try:
                 _unduh(drive, v["id"], tmp)
                 contact_sheet(tmp, sheet)
+                # transkrip narasi sebelum video sementara dihapus
+                t = wa_nilai.transkrip(tmp) if nilai else ""
                 items.append((label, sheet))
-                inti.info("  %02d/%d  %s" % (i, len(vids), label))
+                narasi.append(t)
+                inti.info("  %02d/%d  %s%s" % (i, len(vids), label,
+                          ("  (narasi %d kata)" % len(t.split())) if nilai else ""))
             except Exception as e:
                 inti.info("  %02d/%d  GAGAL %s : %s" % (i, len(vids), label, str(e)[:70]))
             finally:
                 if os.path.exists(tmp):
                     os.remove(tmp)
         review_pdf("Kurasi visual - %s" % nama_folder, items, pdf)
+        inti.info("Buku tinjauan PDF: %s" % pdf)
+        if nilai and items:
+            wa_nilai.simpan_narasi(wa_nilai.jalur_narasi(tujuan), items, narasi)
+            wa_nilai.nilai_banyak(items, nama_folder,
+                                  wa_nilai.jalur_laporan(tujuan), narasi)
     finally:
         shutil.rmtree(kerja, ignore_errors=True)   # tak menyisakan jpg/video
 
     inti.catat("kurasi %s: %d video -> %s" % (nama_folder, len(items), pdf))
     inti.info("\nSelesai. %d video langsung jadi PDF (jpg & video tidak disimpan)." % len(items))
-    inti.info("Buku tinjauan PDF: %s" % pdf)
     inti.info("Folder hasil: %s" % tujuan)
     return tujuan, pdf

@@ -15,6 +15,7 @@ Yang membuatnya aman:
 """
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -33,7 +34,18 @@ PORT = 8733
 app = Flask(__name__, static_folder=None)
 
 JOBS = {}                                   # job_id -> dict
+JOBS_KUNCI = threading.Lock()
+SIMPAN_JOB = 10                             # job selesai yang disimpan
 ID_OK = re.compile(r"^[A-Za-z0-9_\-]{10,}$")  # id folder Drive yang wajar
+HOST_OK = {"127.0.0.1:%d" % PORT, "localhost:%d" % PORT}
+
+
+@app.before_request
+def cek_host():
+    # Tolak Host asing: menutup celah DNS rebinding (situs lain yang namanya
+    # diarahkan ke 127.0.0.1 lalu memanggil /api/hapus dari browser).
+    if request.host not in HOST_OK:
+        abort(403)
 
 
 def _di_dalam(path, akar):
@@ -42,11 +54,9 @@ def _di_dalam(path, akar):
     return p == a or p.startswith(a + os.sep)
 
 
-def _jalankan(job_id, folder_id, tulis):
+def _jalankan(job_id, cmd):
     job = JOBS[job_id]
-    cmd = [sys.executable, "-u", "wa.py", "kurasi", folder_id]
-    if tulis:
-        cmd.append("--tulis")
+    cmd = [sys.executable, "-u", "wa.py"] + cmd
     try:
         proc = subprocess.Popen(
             cmd, cwd=inti.AKAR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -60,6 +70,9 @@ def _jalankan(job_id, folder_id, tulis):
             m = re.search(r"Folder hasil:\s*(.+)$", line)
             if m:
                 job["folder"] = m.group(1).strip()
+            m = re.search(r"Laporan kurasi:\s*(.+)$", line)
+            if m:
+                job["laporan"] = m.group(1).strip()
         proc.wait()
         job["kode"] = proc.returncode
     except Exception as e:
@@ -74,14 +87,42 @@ def mulai():
     d = request.get_json(silent=True) or {}
     folder_id = kurasi.id_dari_link((d.get("link") or "").strip())
     if not ID_OK.match(folder_id or ""):
-        return jsonify(pesan="Link / id folder Drive tidak dikenali."), 400
-    job_id = uuid.uuid4().hex
-    JOBS[job_id] = {"baris": [], "selesai": False, "kode": None,
-                    "folder": None, "pdf": None}
-    threading.Thread(target=_jalankan,
-                     args=(job_id, folder_id, not bool(d.get("pratinjau"))),
-                     daemon=True).start()
+        return jsonify(pesan="Link tidak dikenali - pakai link folder Drive "
+                             "(/folders/...) atau link video (/file/d/...)."), 400
+    cmd = ["kurasi", folder_id]
+    if not d.get("pratinjau"):
+        cmd.append("--tulis")
+        if d.get("nilai", True):
+            cmd.append("--nilai")
+    return _job_baru(cmd)
+
+
+def _job_baru(cmd):
+    """Mulai job - satu per satu saja: unduh + ffmpeg + Claude paralel itu
+    berat, dua sekaligus bisa menghabiskan RAM."""
+    with JOBS_KUNCI:
+        if any(not j["selesai"] for j in JOBS.values()):
+            return jsonify(pesan="Masih ada proses yang berjalan - tunggu "
+                                 "sampai selesai."), 409
+        # buang job selesai yang lama supaya memori tak terus bertambah
+        for lama in list(JOBS)[:max(0, len(JOBS) - SIMPAN_JOB + 1)]:
+            del JOBS[lama]
+        job_id = uuid.uuid4().hex
+        JOBS[job_id] = {"baris": [], "selesai": False, "kode": None,
+                        "folder": None, "pdf": None, "laporan": None}
+    threading.Thread(target=_jalankan, args=(job_id, cmd), daemon=True).start()
     return jsonify(job=job_id)
+
+
+@app.post("/api/nilai")
+def nilai():
+    """Nilai ulang (kata & visual) satu folder hasil yang sudah ada di kurasi/."""
+    d = request.get_json(silent=True) or {}
+    path = (d.get("path") or "").strip()
+    if (not path or not _di_dalam(path, inti.KURASI) or not os.path.isdir(path)
+            or os.path.realpath(path) == os.path.realpath(inti.KURASI)):
+        return jsonify(pesan="Folder hasil tidak dikenali."), 400
+    return _job_baru(["nilai", os.path.realpath(path)])
 
 
 @app.get("/api/status/<job_id>")
@@ -90,7 +131,56 @@ def status(job_id):
     if not job:
         return jsonify(pesan="Job tidak ada."), 404
     return jsonify(baris=job["baris"], selesai=job["selesai"], kode=job["kode"],
-                   folder=job["folder"], pdf=job["pdf"])
+                   folder=job["folder"], pdf=job["pdf"], laporan=job["laporan"])
+
+
+@app.get("/api/hasil")
+def hasil():
+    """Daftar folder yang sudah dikurasi + PDF di dalamnya, terbaru dulu.
+    Dipakai panel 'Hasil tersimpan'. Hanya membaca di dalam kurasi/."""
+    daftar = []
+    if os.path.isdir(inti.KURASI):
+        for nama in os.listdir(inti.KURASI):
+            fol = os.path.join(inti.KURASI, nama)
+            if not os.path.isdir(fol) or not _di_dalam(fol, inti.KURASI):
+                continue
+            pdfs = []
+            for berkas in os.listdir(fol):
+                if berkas.lower().endswith((".pdf", ".txt")):
+                    p = os.path.join(fol, berkas)
+                    pdfs.append({"nama": berkas, "path": p,
+                                 "mtime": os.path.getmtime(p)})
+            if pdfs:
+                pdfs.sort(key=lambda x: x["mtime"], reverse=True)
+                daftar.append({"folder": nama, "path": fol, "pdf": pdfs,
+                               "mtime": pdfs[0]["mtime"]})
+    daftar.sort(key=lambda x: x["mtime"], reverse=True)
+    return jsonify(hasil=daftar)
+
+
+@app.post("/api/hapus")
+def hapus():
+    """Hapus satu berkas (PDF) atau satu folder hasil - HANYA di dalam kurasi/.
+    Folder akar kurasi sendiri dilindungi."""
+    d = request.get_json(silent=True) or {}
+    path = (d.get("path") or "").strip()
+    if not path or not _di_dalam(path, inti.KURASI):
+        return jsonify(pesan="Jalur di luar folder kurasi - ditolak."), 400
+    if os.path.realpath(path) == os.path.realpath(inti.KURASI):
+        return jsonify(pesan="Folder akar kurasi tidak boleh dihapus."), 400
+    if any(not j["selesai"] for j in JOBS.values()):
+        return jsonify(pesan="Tunggu proses yang berjalan selesai dulu "
+                             "sebelum menghapus."), 409
+    try:
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        elif os.path.isfile(path):
+            os.remove(path)
+        else:
+            return jsonify(pesan="Berkas/folder tidak ditemukan."), 404
+    except Exception as e:
+        return jsonify(pesan="Gagal menghapus: %s" % str(e)[:120]), 500
+    return jsonify(ok=True)
 
 
 @app.get("/api/berkas")
@@ -98,8 +188,11 @@ def berkas():
     path = request.args.get("path", "")
     if not path or not _di_dalam(path, inti.KURASI) or not os.path.isfile(path):
         abort(404)
-    if os.path.splitext(path)[1].lower() not in (".pdf", ".jpg", ".jpeg", ".png"):
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in (".pdf", ".jpg", ".jpeg", ".png", ".txt"):
         abort(403)
+    if ext == ".txt":
+        return send_file(path, mimetype="text/plain; charset=utf-8")
     return send_file(path)
 
 

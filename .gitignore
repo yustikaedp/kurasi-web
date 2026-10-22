@@ -17,6 +17,13 @@ indeks_drive.json
 
 # Catatan jalan
 riwayat.log
+server.log
+
+# Ekspor/preview laporan yang longgar - hasil kurasi disimpan HANYA sebagai
+# PDF di kurasi/, jangan sebagai gambar lepas yang bikin folder penuh.
+lap_*.png
+# Screenshot sementara buat memeriksa tampilan web - bukan bagian aplikasi.
+app*.png
 
 __pycache__/
 *.pyc
@@ -24,3 +31,10 @@ __pycache__/
 # Frontend React: dependensi & hasil build, jangan masuk repo
 web/node_modules/
 web/dist/
+
+# PDF besar di _recek (bahan recek, puluhan MB) - jangan masuk repo & jangan
+# ikut discan Claude Code. Script .py di _recek tetap bisa ditrack.
+_recek/*.pdf
+
+# Model whisper (ubah suara narasi jadi teks), ~190 MB - unduh ulang bila hilang
+model/
